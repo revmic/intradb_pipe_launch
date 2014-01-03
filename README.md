@@ -11,9 +11,8 @@ envoy module
 hcpxnat (Installation)
 
 Installation:
-(need to put this in install.sh)
-rmdir hcpxnat
-git clone https://github.com/revmic/hcpxnat
+./install.sh
+update.sh is not recommended unless there is a known issue with the hcpxnat interface module.
 
 Usage: 
 python intradbPipelineLauncher.py -u usr -p pass -H https://intradb.humanconnectome.org -s 100307_strc,100408_fnca -P HCP_Phase2 -i facemask

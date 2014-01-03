@@ -10,13 +10,15 @@ import os
 Usage:
 python intradbPipelineLauncher.py -u usr -p pss -H intradb.. -s 100307_strc,100408_fnca -P HCP_Phase2 -i facemask
 '''
-# TODO - 
-# logging
-# Right before launch, check again for resources?
-
 __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
 __version__ = "0.8.1"
+
+# TODO - 
+# logging
+# Right before launch, check again for resources?
+# Won't launch but doesn't appear to fail when there are Active Process workflow entries
+# - Need to dismiss these
 
 parser = OptionParser(usage='\npython intradbPipelineLauncher.py -u usr -p pass ' +
     '-H https://intradb.humanconnectome.org -s 100307_strc,100408_fnca -P HCP_Phase2 -i facemask')
@@ -28,7 +30,7 @@ parser.add_option("-P", "--project", action="store", type="string", dest="projec
 parser.add_option("-i", "--pipeline", action="store", type="string", dest="pipeline",
     help='Options: validation, facemask, dcm2nii, or level2qc')
 #parser.add_option("-e", "--existing", action="store", type="string", dest="existing")
-#parser.add_option("-o", "--runOther", action="store", type="string", dest="project")
+#parser.add_option("-o", "--runOther", action="store", type="string", dest="runOther")
 (opts, args) = parser.parse_args()
 
 if not opts.username:
@@ -38,8 +40,8 @@ if not opts.username:
 idb = HcpInterface(opts.hostname, opts.username, opts.password, opts.project)
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d%M%s")
-builddir = '/data/intradb/build1/'+opts.project+'/' + timestamp
-archivedir = '/data/intradb/archive1/'+opts.project+'/arc001'
+builddir = '/data/intradb/build1/' + opts.project + '/' + timestamp
+archivedir = '/data/intradb/archive1/' + opts.project + '/arc001'
 
 if not os.path.exists(builddir):
     os.makedirs(builddir)
