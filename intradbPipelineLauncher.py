@@ -40,8 +40,8 @@ if not opts.username:
 idb = HcpInterface(opts.hostname, opts.username, opts.password, opts.project)
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d%M%s")
-builddir = '/data/intradb/build1/' + opts.project + '/' + timestamp
-archivedir = '/data/intradb/archive1/' + opts.project + '/arc001'
+builddir = '/data/intradb/build/' + opts.project + '/' + timestamp
+archivedir = '/data/intradb/archive/' + opts.project + '/arc001'
 
 if not os.path.exists(builddir):
     os.makedirs(builddir)
@@ -50,6 +50,8 @@ def launchValidation():
     print "Protocol Validation not yet implemented."
 
 def launchFacemask():
+    ref_session = 'strc_rt' if idb.project == 'Phase2_Retest' else 'strc'
+
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
           ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
           ' -pipeline /data/intradb/pipeline/catalog/FaceMasking/FaceMasking.xml' + \
@@ -78,7 +80,7 @@ def launchFacemask():
           ' -parameter maskears=1' + \
           ' -parameter invasiveness=1.0' + \
           ' -parameter threshold=-1' + \
-          ' -parameter ref_session=strc' + \
+          ' -parameter ref_session=' + ref_session + \
           ' -parameter ref_scan_type=T1w' + \
           ' -parameter ref=NONE' + \
           ' -parameter use_manual_roi=0' + \
