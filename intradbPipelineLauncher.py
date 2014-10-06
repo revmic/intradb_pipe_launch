@@ -12,13 +12,11 @@ python intradbPipelineLauncher.py -u usr -p pss -H intradb.. -s 100307_strc,1004
 '''
 __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 # TODO - 
 # logging
 # Right before launch, check again for resources?
-# Won't launch but doesn't appear to fail when there are Active Process workflow entries
-# - Need to dismiss these
 
 parser = OptionParser(usage='\npython intradbPipelineLauncher.py -u usr -p pass ' +
     '-H https://intradb.humanconnectome.org -s 100307_strc,100408_fnca -P HCP_Phase2 -i facemask')
@@ -29,8 +27,11 @@ parser.add_option("-s", "--sessions", action="store", type="string", dest="sessi
 parser.add_option("-P", "--project", action="store", type="string", dest="project")
 parser.add_option("-i", "--pipeline", action="store", type="string", dest="pipeline",
     help='Options: validation, facemask, dcm2nii, or level2qc')
+parser.add_option("-o", "--runOther", action="store_true", dest="runOther", default=False)
+parser.add_option("-U", "--unusable", action="store_true", dest="unusable", default=False)
+parser.add_option("-d", "--dryRun", action="store_true", dest="dryRun", default=False)
+# For existing resources, we currently assume Overwrite
 #parser.add_option("-e", "--existing", action="store", type="string", dest="existing")
-#parser.add_option("-o", "--runOther", action="store", type="string", dest="runOther")
 (opts, args) = parser.parse_args()
 
 if not opts.username:
@@ -46,15 +47,39 @@ archivedir = '/data/intradb/archive/' + opts.project + '/arc001'
 if not os.path.exists(builddir):
     os.makedirs(builddir)
 
+runOtherParam = 'Y' if opts.runOther else 'N'
+
+
 def launchValidation():
     print "Protocol Validation not yet implemented."
 
 def launchFacemask():
-    ref_session = 'strc_rt' if idb.project == 'Phase2_Retest' else 'strc'
+    # 2014-9-23: We now have two different versions of the pipeline used for different projects
+    # TODO: Refactor how pipeline version and session suffix is handled
+    facemask_xml = "FaceMasking/FaceMasking.xml"
+    if 'LS_Phase1' in idb.project or 'Mamah' in idb.project:
+        ref_session = getReferenceSession()
+        facemask_xml = "FaceMaskingV2/FaceMaskingV2.xml"
+    elif 'Retest' in idb.project:
+        ref_session = idb.subject_label + '_strc_rt'
+    elif '3T7T' in idb.project:
+        ref_session = idb.subject_label + '_3T'
+        facemask_xml = "FaceMaskingV2/FaceMaskingV2.xml"
+    else:
+        ref_session = idb.subject_label + '_strc'
+
+    scan_ids = filterScanIds()
+    ref_scan_id = getReferenceScan(ref_session)
+
+    print "Facemask xml:", facemask_xml
+    print "idb session id:", idb.getSessionId()
+    print "idb subject id:", idb.getSubjectId()
+    print "ref session:", ref_session
+    print "ref scanid:", ref_scan_id
 
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
           ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
-          ' -pipeline /data/intradb/pipeline/catalog/FaceMasking/FaceMasking.xml' + \
+          ' -pipeline /data/intradb/pipeline/catalog/' + facemask_xml + \
           ' -id ' + idb.getSessionId() + \
           ' -host ' + opts.hostname + \
           ' -u ' + opts.username + \
@@ -74,7 +99,7 @@ def launchFacemask():
           ' -parameter sessionId=' + idb.session_label + \
           ' -parameter archivedir=' + archivedir + \
           ' -parameter project=' + idb.project + \
-          ' -parameter scanids=' + ",".join(idb.getSessionScanIds()) + \
+          ' -parameter scanids=' + ",".join(scan_ids) + \
           ' -parameter subject=' + idb.getSubjectId() + \
           ' -parameter usebet=1' + \
           ' -parameter maskears=1' + \
@@ -82,21 +107,102 @@ def launchFacemask():
           ' -parameter threshold=-1' + \
           ' -parameter ref_session=' + ref_session + \
           ' -parameter ref_scan_type=T1w' + \
-          ' -parameter ref=NONE' + \
+          ' -parameter ref=' + ref_scan_id + \
           ' -parameter use_manual_roi=0' + \
           ' -parameter rois=0' + \
           ' -parameter dirs=0' + \
           ' -parameter existing=Overwrite' + \
-          ' -parameter runOtherPipelines=N'
+          ' -parameter runOtherPipelines=' + runOtherParam
 
+    print "\n=========================="
+    print "PICKED SESSION", getReferenceSession()
+    print facemask_xml
+    print "Reference sesion:", ref_session
+    print "Reference scan id:", ref_scan_id
+    print ''
     print cmd
 
-    p = envoy.run(cmd)
-    print p.std_out
-    print p.std_err
-    print p.status_code
+    if not opts.dryRun:
+        p = envoy.run(cmd)
+        print p.std_out
+        print p.std_err
+
+    #print p.status_code
     # do someting with std_out/err
     # return codes??
+
+def filterScanIds():
+    """
+    Throw out any scans marked unusable since they're often problematic and
+    shouldn't end up on Connectomedb
+    """
+    scans = idb.getSessionScans()
+    scan_ids = list()
+
+    for scan in scans:
+        # don't process scan if it is unusable and the unusable param isn't set
+        if scan['quality'] == 'unusable' and not opts.unusable:
+            continue
+        else:
+            scan_ids.append(scan['ID'])
+    return scan_ids
+
+def getReferenceSession():
+    """
+    Lifespan subjects could have Structural scans in different sessions.
+    This will go through the sessions making sure it can find a good T1w
+    """
+    # Save a reference to the session being facemasked
+    facemask_session_label = idb.session_label
+    sessions = idb.getSubjectSessions()
+    if 'LS_Phase' in idb.project:
+        ref_session = idb.subject_label + '_V1_A'
+    elif 'Mamah' in idb.project:
+        ref_session = idb.subject_label + '_A2'
+    else:
+        ref_session = idb.subject_label + '_strc'
+
+    for s in sessions:
+        idb.session_label = s['label']
+        scans = idb.getSessionScans()
+        
+        for scan in scans:
+            if scan['type'] == 'T1w' and \
+                (scan['quality'] == 'good' or scan['quality'] == 'usable'):
+                ref_session = idb.session_label
+                break
+
+    # Set the intradb instance variable back to the session being facemasked
+    idb.session_label = facemask_session_label
+    return ref_session
+
+def getReferenceScan(ref_session):
+    """
+    Make one pass through scans and set ref to the first T1w
+    Make a second pass and set to first 'good' quality if it exists
+    Initialize the ref scan to 'NONE' in the event 1&2 don't find anything
+    """
+    # Save a reference to the session being facemasked
+    facemask_session_label = idb.session_label
+    # Set idb instance variable so we can perform actions on our idb object
+    idb.session_label = ref_session
+    scans = idb.getSessionScans()
+    ref_scan_id = 'NONE'
+
+    for scan in scans:
+        if scan['type'] == 'T1w':
+            ref_scan_id = scan['ID']
+            break
+
+    for scan in scans:
+        if scan['type'] == 'T1w' and \
+                (scan['quality'] == 'good' or scan['quality'] == 'usable'):
+            ref_scan_id = scan['ID']
+            break
+
+    # Set the intradb instance variable back to the session being facemasked
+    idb.session_label = facemask_session_label
+    return ref_scan_id
 
 def launchDicomToNifti():
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
@@ -125,19 +231,22 @@ def launchDicomToNifti():
           ' -parameter create_nii=Y' + \
           ' -parameter keep_qc=N' + \
           ' -parameter overwrite_existing=Y' + \
-          ' -parameter runOtherPipelines=N' + \
+          ' -parameter runOtherPipelines=' + runOtherParam + \
           ' -parameter notify=0'
 
     print cmd
-    p = envoy.run(cmd)
-    print p.std_out
-    print p.std_err
-    print p.status_code
+    if not opts.dryRun:
+        p = envoy.run(cmd)
+        print p.std_out
+        print p.std_err
+        #print p.status_code
 
 def launchLevel2QC():
+    print "Session ID for %s is %s" % (idb.session_label, idb.getSessionId())
+
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
           ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
-          ' -pipeline /data/intradb/pipeline/catalog/HCP_QC/Wrapper_QC/Level2QCLauncher_v1.0.xml' + \
+          ' -pipeline /data/intradb/pipeline/catalog/HCP_QC_PARALLEL/Wrapper_QC/Level2QCLauncher_v2.0.xml' + \
           ' -id ' + idb.getSessionId() + \
           ' -host ' + opts.hostname + \
           ' -u ' + opts.username + \
@@ -156,22 +265,21 @@ def launchLevel2QC():
           ' -parameter sessionId=' + idb.session_label + \
           ' -parameter archivedir=' + archivedir + \
           ' -parameter project=' + idb.project + \
-          ' -parameter structural_scan_type=T1w,T2w' + \
           ' -parameter functional_scan_type=rfMRI,tfMRI' + \
-          ' -parameter diffusion_scan_type=dMRI'
+          ' -parameter fieldMap_scan_type=FieldMap'
 
     print cmd
-    p = envoy.run(cmd)
-    print p.std_out
-    print p.std_err
-    print p.status_code
-
+    if not opts.dryRun:
+        p = envoy.run(cmd)
+        print p.std_out
+        print p.std_err
+        #print p.status_code
 
 if __name__ == "__main__":
     sessions = opts.sessions.split(',')
     print "=" * 82
     print "Launching %s pipeline for %s sessions on %s" % \
-    (opts.pipeline, sessions.__len__(), idb.url)
+        (opts.pipeline, sessions.__len__(), idb.url)
     print "Build directory: " + builddir
     print "Archive directory: " + archivedir
     print "=" * 82
