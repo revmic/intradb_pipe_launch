@@ -2,7 +2,9 @@
 from hcpxnat.interface import HcpInterface
 from optparse import OptionParser
 import datetime
+import socket
 import envoy
+import time
 import sys
 import os
 
@@ -12,7 +14,7 @@ python intradbPipelineLauncher.py -u usr -p pss -H intradb.. -s 100307_strc,1004
 '''
 __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
-__version__ = "0.9.0"
+__version__ = "0.9.4"
 
 # TODO - 
 # logging
@@ -27,11 +29,18 @@ parser.add_option("-s", "--sessions", action="store", type="string", dest="sessi
 parser.add_option("-P", "--project", action="store", type="string", dest="project")
 parser.add_option("-i", "--pipeline", action="store", type="string", dest="pipeline",
     help='Options: validation, facemask, dcm2nii, or level2qc')
-parser.add_option("-o", "--runOther", action="store_true", dest="runOther", default=False)
-parser.add_option("-U", "--unusable", action="store_true", dest="unusable", default=False)
-parser.add_option("-d", "--dryRun", action="store_true", dest="dryRun", default=False)
+parser.add_option("-r", "--runOther", action="store_true", dest="runOther", default=False)
+parser.add_option("-o", "--overwrite", action="store_true", dest="overwrite", default=False,
+    help='Overwrite existing resources (assumed true for facemask and dcm2nii)')
+
+# Currently assume overwrite for facemask and dcm2nii
+parser.add_option("-U", "--unusable", action="store_true", dest="unusable", default=False,
+    help='Try defacing unusable scans (skipped by default)')
+parser.add_option("-d", "--delay", action="store", type="string", dest="delay",
+    help='Delay between pipeline launches in minutes')
+parser.add_option("-D", "--dryRun", action="store_true", dest="dryRun", default=False)
 # For existing resources, we currently assume Overwrite
-#parser.add_option("-e", "--existing", action="store", type="string", dest="existing")
+
 (opts, args) = parser.parse_args()
 
 if not opts.username:
@@ -41,6 +50,7 @@ if not opts.username:
 idb = HcpInterface(opts.hostname, opts.username, opts.password, opts.project)
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d%M%s")
+
 builddir = '/data/intradb/build/' + opts.project + '/' + timestamp
 archivedir = '/data/intradb/archive/' + opts.project + '/arc001'
 
@@ -49,27 +59,60 @@ if not os.path.exists(builddir):
 
 runOtherParam = 'Y' if opts.runOther else 'N'
 
+#######################################################
+# Pipline versions
+facemask_versions = {
+    'HCP_Phase2':    'FaceMasking/FaceMasking.xml',
+    'Phase2_Retest': 'FaceMasking/FaceMasking.xml',
+    'Phase2_7T':     'FaceMaskingV2/FaceMaskingV2.xml',
+    'LS_Phase1a':    'FaceMaskingV2/FaceMaskingV2.xml',
+    'LS_Phase1b':    'FaceMaskingV2/FaceMaskingV2.xml',
+    'LS_3T7T_1B':    'FaceMaskingV2/FaceMaskingV2.xml',
+    'Mamah_CPC':     'FaceMaskingV2/FaceMaskingV2.xml'
+    }
+
+dcm2nii_versions = {
+    'LS_3T7T_1B':    'HCP/HCPDefaceDicomToNifti2013.xml',
+    'Mamah_CPC':     'HCP/HCPDefaceDicomToNifti2013.xml',
+    'HCP_Phase2':    'HCP/HCPDefaceDicomToNifti.xml',
+    'Phase2_Retest': 'HCP/HCPDefaceDicomToNifti.xml', 
+    'Phase1_7T':     'HCP/HCPDefaceDicomToNifti.xml',
+    'Phase2_7T':     'HCP/HCPDefaceDicomToNifti.xml',
+    'LS_Phase1a':    'HCP/HCPDefaceDicomToNifti.xml',
+    'LS_Phase1b':    'HCP/HCPDefaceDicomToNifti.xml',
+    'Skyra_QC':      'HCP/HCPDefaceDicomToNifti.xml',
+    'DMC_Phase1a':   'HCP/HCPDefaceDicomToNifti.xml',
+    'Phase1Skyra':   'HCP/HCPDefaceDicomToNifti.xml'
+    }
+
+level2qc_xml = "HCP_QC_PARALLEL/Wrapper_QC/Level2QCLauncher_v2.0.xml"
+
 
 def launchValidation():
     print "Protocol Validation not yet implemented."
 
 def launchFacemask():
-    # 2014-9-23: We now have two different versions of the pipeline used for different projects
+    # We now have two different versions of the pipeline used for different 
+    # projects. -Hileman 2014-9-23
     # TODO: Refactor how pipeline version and session suffix is handled
-    facemask_xml = "FaceMasking/FaceMasking.xml"
-    if 'LS_Phase1' in idb.project or 'Mamah' in idb.project:
-        ref_session = getReferenceSession()
-        facemask_xml = "FaceMaskingV2/FaceMaskingV2.xml"
-    elif 'Retest' in idb.project:
-        ref_session = idb.subject_label + '_strc_rt'
-    elif '3T7T' in idb.project:
-        ref_session = idb.subject_label + '_3T'
-        facemask_xml = "FaceMaskingV2/FaceMaskingV2.xml"
-    else:
-        ref_session = idb.subject_label + '_strc'
+    try:
+        facemask_xml = facemask_versions[idb.project]
+    except KeyError:
+        print idb.project, "not in facemask_versions map. Assuming FaceMaskingV2.xml ..."
+        facemask_xml = 'FaceMaskingV2/FaceMaskingV2.xml'
 
+    if idb.project == 'Phase2_7T':
+        ref_project = 'HCP_Phase2'
+    else:
+        ref_project = idb.project
+
+    ref_session = getReferenceSession(ref_project)
+    if not ref_session:
+        return
+
+    ref_scan_id = getReferenceScan(ref_project, ref_session)
+    # TODO - getReferences(): combine all reference gets
     scan_ids = filterScanIds()
-    ref_scan_id = getReferenceScan(ref_session)
 
     print "Facemask xml:", facemask_xml
     print "idb session id:", idb.getSessionId()
@@ -77,8 +120,17 @@ def launchFacemask():
     print "ref session:", ref_session
     print "ref scanid:", ref_scan_id
 
-    cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
-          ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
+    # Don't use the PipelineJobSubmitter if launching from any node other than
+    # hcpi-fs01 or hcpi-dev VMs. This causes an issue when launching from the
+    # interface and autorun since it will try to submit the job from a node
+    # that isn't allowed. -Hileman 2014-11-06
+    if 'hcpi' in socket.gethostname():
+        cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter'
+    else:
+        cmd = ''
+
+    #cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
+    cmd +=' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
           ' -pipeline /data/intradb/pipeline/catalog/' + facemask_xml + \
           ' -id ' + idb.getSessionId() + \
           ' -host ' + opts.hostname + \
@@ -114,11 +166,13 @@ def launchFacemask():
           ' -parameter existing=Overwrite' + \
           ' -parameter runOtherPipelines=' + runOtherParam
 
+    # TODO - Get rid of hard coding
+    if idb.project == 'Phase2_7T':
+        cmd += ' -parameter ref_project=HCP_Phase2'
+    if '7T' in idb.session_label:
+        cmd += ' -parameter other_flags_and_args=-am'
+
     print "\n=========================="
-    print "PICKED SESSION", getReferenceSession()
-    print facemask_xml
-    print "Reference sesion:", ref_session
-    print "Reference scan id:", ref_scan_id
     print ''
     print cmd
 
@@ -127,14 +181,10 @@ def launchFacemask():
         print p.std_out
         print p.std_err
 
-    #print p.status_code
-    # do someting with std_out/err
-    # return codes??
-
 def filterScanIds():
     """
-    Throw out any scans marked unusable since they're often problematic and
-    shouldn't end up on Connectomedb
+    If the -U option isn't set, throw out any scans marked unusable since 
+    they're often problematic and shouldn't end up on Connectomedb
     """
     scans = idb.getSessionScans()
     scan_ids = list()
@@ -147,21 +197,40 @@ def filterScanIds():
             scan_ids.append(scan['ID'])
     return scan_ids
 
-def getReferenceSession():
+def getReferenceSession(ref_project):
     """
     Lifespan subjects could have Structural scans in different sessions.
     This will go through the sessions making sure it can find a good T1w
     """
-    # Save a reference to the session being facemasked
+    # Save a reference to the session and project being facemasked
     facemask_session_label = idb.session_label
+    facemask_project = idb.project
+    idb.project = ref_project
     sessions = idb.getSubjectSessions()
+
+
+
+    # Set some defaults in case nothing is found
     if 'LS_Phase' in idb.project:
         ref_session = idb.subject_label + '_V1_A'
     elif 'Mamah' in idb.project:
         ref_session = idb.subject_label + '_A2'
+    elif 'Phase2_Retest' in idb.project:
+        ref_session = idb.subject_label + '_strc_rt'
     else:
         ref_session = idb.subject_label + '_strc'
 
+    # First pass doesn't consider usability for the sake of autoruns
+    for s in sessions:
+        idb.session_label = s['label']
+        scans = idb.getSessionScans()
+
+        for scan in scans:
+            if scan['type'] == 'T1w':
+                ref_session = idb.session_label
+                break
+
+    # Second pass considers usability
     for s in sessions:
         idb.session_label = s['label']
         scans = idb.getSessionScans()
@@ -172,42 +241,70 @@ def getReferenceSession():
                 ref_session = idb.session_label
                 break
 
-    # Set the intradb instance variable back to the session being facemasked
+    if not idb.experimentExists(ref_session):
+        print "\nReference session", ref_session, "in", ref_project, "not found."
+        print "Skipping ...\n"
+        # Set to None so facemask method knows to skip
+        ref_session = None
+
+    # Set the intradb instance variable back to the session and project being facemasked
     idb.session_label = facemask_session_label
+    idb.project = facemask_project
+
     return ref_session
 
-def getReferenceScan(ref_session):
+
+def getReferenceScan(ref_project, ref_session):
     """
     Make one pass through scans and set ref to the first T1w
     Make a second pass and set to first 'good' quality if it exists
     Initialize the ref scan to 'NONE' in the event 1&2 don't find anything
     """
-    # Save a reference to the session being facemasked
+    # Save a reference to the session and project being facemasked
     facemask_session_label = idb.session_label
+    facemask_project = idb.project
     # Set idb instance variable so we can perform actions on our idb object
     idb.session_label = ref_session
+    idb.project = ref_project
     scans = idb.getSessionScans()
-    ref_scan_id = 'NONE'
+    ref_scan_id = 'NONE' # Let pipeline figure it out if nothing found
 
+    # First pass grabs the first T1w
     for scan in scans:
         if scan['type'] == 'T1w':
             ref_scan_id = scan['ID']
             break
 
+    # Second pass picks anything but unusable, mostly useful for cases where 
+    # some scans are set to unusable while others are left undeterminted
+    for scan in scans:
+        if scan['type'] == 'T1w' and (scan['quality'] != 'unusable'):
+            ref_scan_id = scan['ID']
+            break
+
+
+    # Third pass considers usability
     for scan in scans:
         if scan['type'] == 'T1w' and \
                 (scan['quality'] == 'good' or scan['quality'] == 'usable'):
             ref_scan_id = scan['ID']
             break
 
-    # Set the intradb instance variable back to the session being facemasked
+    # Set the intradb instance variable back to the session and project being facemasked
     idb.session_label = facemask_session_label
+    idb.project = facemask_project
     return ref_scan_id
 
 def launchDicomToNifti():
+    try:
+        dcm2nii_xml = dcm2nii_versions[idb.project]
+    except KeyError:
+        print idb.project, "not in dcm2nii_versions map. Assuming HCPDefaceDicomToNifti2013.xml ..."
+        dcm2nii_xml = 'HCP/HCPDefaceDicomToNifti2013.xml'
+
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
           ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
-          ' -pipeline /data/intradb/pipeline/catalog/HCP/HCPDefaceDicomToNifti.xml' + \
+          ' -pipeline /data/intradb/pipeline/catalog/' + dcm2nii_xml + \
           ' -id ' + idb.getSessionId() + \
           ' -host ' + opts.hostname + \
           ' -u ' + opts.username + \
@@ -242,11 +339,12 @@ def launchDicomToNifti():
         #print p.status_code
 
 def launchLevel2QC():
-    print "Session ID for %s is %s" % (idb.session_label, idb.getSessionId())
-
+    if opts.overwrite:# and not opts.dryRun:
+        deleteExistingQC()
+        
     cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter' + \
           ' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
-          ' -pipeline /data/intradb/pipeline/catalog/HCP_QC_PARALLEL/Wrapper_QC/Level2QCLauncher_v2.0.xml' + \
+          ' -pipeline /data/intradb/pipeline/catalog/' + level2qc_xml + \
           ' -id ' + idb.getSessionId() + \
           ' -host ' + opts.hostname + \
           ' -u ' + opts.username + \
@@ -275,6 +373,21 @@ def launchLevel2QC():
         print p.std_err
         #print p.status_code
 
+def deleteExistingQC():
+    print "Deleting QC Assessments for", idb.session_label
+    assessments = idb.getSessionAssessors()
+    qc_assessments = []
+
+    for ass in assessments:
+        if 'qcAssessment' in ass['xsiType']:
+            qc_assessments.append(ass)
+
+    if not qc_assessments:
+        print "No existing Level2QC assessments to delete"
+
+    for qc_ass in qc_assessments:
+        idb.deleteSessionAssessor(qc_ass['label'])
+
 if __name__ == "__main__":
     sessions = opts.sessions.split(',')
     print "=" * 82
@@ -296,6 +409,16 @@ if __name__ == "__main__":
         elif opts.pipeline == 'dcm2nii':
             launchDicomToNifti()
         elif opts.pipeline == 'level2qc':
+            # Set default delay for level2qc
+            if not opts.delay:
+                opts.delay = '2'
             launchLevel2QC()
         else:
             print "Unknown Intradb pipeline: " + opts.pipeline
+
+        if opts.delay:
+            print "================================="
+            print "Sleeping for", opts.delay, "minutes ..."
+            print "================================="
+            time.sleep(float(opts.delay) * 60)
+
