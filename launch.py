@@ -14,7 +14,7 @@ python intradbPipelineLauncher.py -u usr -p pss -H intradb.. -s 100307_strc,1004
 '''
 __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
-__version__ = "0.9.4"
+__version__ = "1.0.0"
 
 # TODO - 
 # logging
@@ -89,7 +89,48 @@ level2qc_xml = "HCP_QC_PARALLEL/Wrapper_QC/Level2QCLauncher_v2.0.xml"
 
 
 def launchValidation():
-    print "Protocol Validation not yet implemented."
+    if 'hcpi' in socket.gethostname():
+        cmd = '/data/intradb/pipeline/bin/PipelineJobSubmitter'
+    else:
+        cmd = ''
+    print "cmd:", cmd
+
+    print "idb.getSessionId():", idb.getSessionId()
+    print "idb.session_label:", idb.session_label
+
+    cmd +=' /data/intradb/pipeline/bin/XnatPipelineLauncher' + \
+          ' -pipeline /data/intradb/pipeline/catalog/validation_tools/Validate.xml' + \
+          ' -id ' + idb.getSessionId() + \
+          ' -host ' + opts.hostname + \
+          ' -u ' + opts.username + \
+          ' -pwd ' + opts.password + \
+          ' -dataType xnat:mrSessionData' + \
+          ' -label ' + idb.session_label + \
+          ' -supressNotification ' + \
+          ' -project ' + idb.project + \
+          ' -notify 2' + \
+          ' -parameter mailhost=mail.nrg.wustl.edu' + \
+          ' -parameter userfullname=A.Admin' + \
+          ' -parameter adminemail=hilemanm@mir.wustl.edu' + \
+          ' -parameter useremail=hilemanm@mir.wustl.edu' + \
+          ' -parameter xnatserver=HCPIntradb' + \
+          ' -parameter project=' + idb.project + \
+          ' -parameter sessionType=xnat:mrSessionData' + \
+          ' -parameter xnat_id=' + idb.getSessionId() + \
+          ' -parameter sessionId=' + idb.session_label + \
+          ' -parameter archivedir=' + archivedir + \
+          ' -parameter builddir=' + builddir + \
+          ' -parameter xnat_project=' + idb.project + \
+          ' -parameter catalog_content=v0.1' + \
+          ' -parameter session=' + idb.getSessionId() + \
+          ' -parameter sessionLabel=' + idb.session_label
+
+    print cmd
+
+    if not opts.dryRun:
+        p = envoy.run(cmd)
+        print p.std_out
+        print p.std_err
 
 def launchFacemask():
     # We now have two different versions of the pipeline used for different 
@@ -207,8 +248,6 @@ def getReferenceSession(ref_project):
     facemask_project = idb.project
     idb.project = ref_project
     sessions = idb.getSubjectSessions()
-
-
 
     # Set some defaults in case nothing is found
     if 'LS_Phase' in idb.project:
