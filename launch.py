@@ -14,7 +14,7 @@ python intradbPipelineLauncher.py -u usr -p pss -H intradb.. -s 100307_strc,1004
 '''
 __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # TODO - 
 # logging
@@ -438,8 +438,12 @@ if __name__ == "__main__":
 
     for s in sessions:
         idb.session_label = s
-        idb.subject_label = s.split('_')[0]  # idb.getSessionSubject()
-        print '\n** Session: ' + s + '\n'
+        idb.subject_label = idb.getSessionSubject()
+        # TODO - fails sometimes, so check that this found something
+        if not idb.subject_label:
+            idb.subject_label = s.split('_')[0]  # Not general, but often works
+        print '\n** Subject: ' + idb.subject_label
+        print '** Session: ' + s + '\n'
 
         if opts.pipeline == 'validation':
             launchValidation()
