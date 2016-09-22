@@ -20,7 +20,7 @@ __version__ = "1.0.1"
 # logging
 # Right before launch, check again for resources?
 
-parser = OptionParser(usage='\npython intradbPipelineLauncher.py -u usr -p pass ' +
+parser = OptionParser(usage='\npython launch.py -u usr -p pass ' +
     '-H https://intradb.humanconnectome.org -s 100307_strc,100408_fnca -P HCP_Phase2 -i facemask')
 parser.add_option("-u", "--username", action="store", type="string", dest="username")
 parser.add_option("-p", "--password", action="store", type="string", dest="password")
@@ -160,6 +160,7 @@ def launchFacemask():
     print "idb subject id:", idb.getSubjectId()
     print "ref session:", ref_session
     print "ref scanid:", ref_scan_id
+    print "idb.project", idb.project
 
     # Don't use the PipelineJobSubmitter if launching from any node other than
     # hcpi-fs01 or hcpi-dev VMs. This causes an issue when launching from the

@@ -6,9 +6,10 @@ import envoy
 # Use hcpxnat config file or assign each instance variable, e.g.,
 # xnat = HcpInterface(url='http://intradb..', username='user', password='pass', project='Proj')
 idb = HcpInterface(config='/data/intradb/home/hileman/.hcpxnat_intradb.cfg')
-idb.project = 'Phase2_7T'
 # Check resources for which pipeline?
-pipeline = 'level2qc'
+pipeline = 'dcm2nii'
+# For which project
+idb.project = 'DMC_Phase1a'
 timestamp = datetime.now().strftime("%Y%m%d")
 outf = '/data/intradb/home/hileman/intradb_python_pipeline/log/%s_%s_%s.csv' % (idb.project, pipeline, timestamp)
 print outf
@@ -18,15 +19,25 @@ if __name__ == "__main__":
     session_labels = list()
 
     for s in sessions:
+        #if 'Stroop' not in s.get('label'):
+        #    continue
         session_labels.append(s.get('label'))
 
     session_labels = sorted(session_labels, key=lambda s: s.split('_')[0])
 
     for s in session_labels:
-        sub = s.split('_')[0]
-        command = "python resources.py -u %s -p %s -H %s -s %s -S %s -P %s -f %s -i %s" % \
+        idb.session_label = s
+        sub = idb.getSessionSubject()
+        # fails sometimes, so check that this found something
+        #if not sub:
+        #    sub = s.split('_')[0]
+        print sub
+
+        command = "python resources.py -u %s -p %s -H %s -s %s -S %s -P %s -f %s -i %s -I" % \
                             (idb.username, idb.password, idb.url, sub, s, idb.project, outf, pipeline)
         print command
         p = envoy.run(command)
         if p.std_err:
             print p.std_err
+
+    print "Here's your output:", outf

@@ -13,7 +13,7 @@ __author__ = "Michael Hileman"
 __email__ = "hilemanm@mir.wuslt.edu"
 __version__ = "0.9.3"
 
-parser = OptionParser(usage='\npython intradbPipelineResources.py -u user -p pass ' +
+parser = OptionParser(usage='\npython resources.py -u user -p pass ' +
             '-H hostname -s 100307 -S 100307_strc -P HCP_Phase2 -i all -f out.csv\n' +
             'Cutoff Date Usage:\npython intradbPipelineResources.py -u user -p pass ' +
             '-H hostname -P HCP_Phase2 -c 20131210')
